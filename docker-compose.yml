@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    container_name: agro_db
+    restart: on-failure
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  app:
+    build: .
+    container_name: AgroBot
+    restart: unless-stopped
+    depends_on:
+      - db
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - ../TelegramBotBase:/TelegramBotBase
+    environment:
+      - PYTHONPATH=/TelegramBotBase
+
+volumes:
+  db_data:

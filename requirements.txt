@@ -1,0 +1,5 @@
+pandas
+python-decouple==3.8
+python-telegram-bot==21.1.1
+python-telegram-bot[job-queue]
+psycopg2
