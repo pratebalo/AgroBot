@@ -4,19 +4,21 @@ import re
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext, CallbackQueryHandler, CommandHandler, ConversationHandler, MessageHandler, filters
 
-from utils.database import insert_into_table
+from utils.database import delete, insert_into_table, select_where
+from utils.sheets_drive import generate_sheet_fuel
 from .calendar_utils import build_calendar
 from .users import USERS
 
 # Estados de conversación
-SELECT_USER, SELECT_DATE, ENTER_PRICE = range(3)
+SELECT_USER, SELECT_DATE, ENTER_PRICE, ENTER_DELETE_ID = range(4)
 
 
 def _build_users_keyboard() -> InlineKeyboardMarkup:
     buttons = []
-    for name in USERS:
+    for name in USERS[1:]:
         buttons.append([InlineKeyboardButton(name, callback_data=f"gasofa_user_{name}")])
 
+    buttons.append([InlineKeyboardButton("Borrar entrada", callback_data="gasofa_delete_entry")])
     buttons.append([InlineKeyboardButton("Cancelar", callback_data="gasofa_cancel")])
     return InlineKeyboardMarkup(buttons)
 
@@ -45,6 +47,9 @@ async def gasofa_user_selected(update: Update, context: CallbackContext):
     if data == "gasofa_cancel":
         await query.edit_message_text("Operación cancelada")
         return ConversationHandler.END
+
+    if data == "gasofa_delete_entry":
+        return await gasofa_delete_entry(update, context)
 
     if not data.startswith("gasofa_user_"):
         return SELECT_USER
@@ -135,7 +140,7 @@ async def gasofa_price(update: Update, context: CallbackContext):
         await update.message.delete()
         await update.effective_chat.send_message("No se ha podido guardar en BBDD. Vuelve a introducir el precio para reintentarlo.")
         return ENTER_PRICE
-
+    generate_sheet_fuel()
     await update.message.delete()
     await update.effective_chat.send_message(
         f"OK, guardado:\nUsuario: {user_name}\nFecha: {selected_date.strftime('%d/%m/%Y')}\nPrecio/l: {price:.3f} €"
@@ -153,12 +158,50 @@ async def gasofa_cancel(update: Update, _: CallbackContext):
     return ConversationHandler.END
 
 
+async def gasofa_delete_entry(update: Update, context: CallbackContext):
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text("Introduce el número de entrada (ID) que quieres borrar:")
+    else:
+        await update.message.reply_text("Introduce el número de entrada (ID) que quieres borrar:")
+    return ENTER_DELETE_ID
+
+
+async def gasofa_delete_entry_number(update: Update, context: CallbackContext):
+    raw_id = (update.message.text or "").strip()
+    if not raw_id.isdigit():
+        await update.message.reply_text("ID inválido. Escribe un número entero (ej: 12):")
+        return ENTER_DELETE_ID
+
+    entry_id = int(raw_id)
+    existing_entry = select_where("fuel", ["id"], [entry_id])
+    if existing_entry is None:
+        await update.message.reply_text("No se ha podido consultar la BBDD. Inténtalo de nuevo.")
+        return ENTER_DELETE_ID
+
+    if existing_entry.empty:
+        await update.message.reply_text(f"No existe ninguna entrada en fuel con ID {entry_id}.")
+        return ENTER_DELETE_ID
+
+    deleted_entry = delete("fuel", entry_id)
+    if deleted_entry is None or deleted_entry.empty:
+        await update.message.reply_text("No se ha podido borrar la entrada. Inténtalo de nuevo.")
+        return ENTER_DELETE_ID
+
+    generate_sheet_fuel()
+    await update.message.reply_text(f"Entrada {entry_id} borrada correctamente.")
+    return ConversationHandler.END
+
+
 def get_conv_handler():
     return ConversationHandler(
-        entry_points=[CommandHandler("gasofa", gasoil)],
+        entry_points=[
+            CommandHandler("gasofa", gasoil),
+        ],
         states={
             SELECT_USER: [
-                CallbackQueryHandler(gasofa_user_selected, pattern=r"^gasofa_(user_.+|cancel)$"),
+                CallbackQueryHandler(gasofa_user_selected, pattern=r"^gasofa_(user_.+|delete_entry|cancel)$"),
             ],
             SELECT_DATE: [
                 CallbackQueryHandler(gasofa_date_picker, pattern=r"^gasofa_(prev_month|next_month|day_\d+|noop|cancel)$"),
@@ -167,6 +210,12 @@ def get_conv_handler():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gasofa_price),
                 CallbackQueryHandler(gasofa_cancel, pattern=r"^gasofa_cancel$"),
             ],
+            ENTER_DELETE_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gasofa_delete_entry_number),
+            ],
         },
-        fallbacks=[CommandHandler("gasofa", gasoil), CommandHandler("cancel", gasofa_cancel)],
+        fallbacks=[
+            CommandHandler("gasofa", gasoil),
+            CommandHandler("cancel", gasofa_cancel),
+        ],
     )

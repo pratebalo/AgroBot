@@ -1,6 +1,7 @@
 import os.path
 import random
-import utils.gillweb as gillweb
+
+import pandas as pd
 from decouple import config
 from bot_base.logger_config import logger
 from googleapiclient.discovery import build
@@ -8,7 +9,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
-from datetime import datetime
 import utils.database as db
 
 DICT = {
@@ -41,16 +41,10 @@ sheets_service = build('sheets', 'v4', credentials=creds, cache_discovery=False)
 spreadsheets = sheets_service.spreadsheets()
 drive = build('drive', 'v3', credentials=creds, cache_discovery=False)
 
-ID_SHEET_CASTORES = config('ID_SHEET_CASTORES')
-ID_SHEET_MANADA = config('ID_SHEET_MANADA')
-ID_SHEET_TROPA = config('ID_SHEET_TROPA')
-ID_SHEET_ESCULTAS = config('ID_SHEET_ESCULTAS')
-ID_SHEET_ROVER = config('ID_SHEET_ROVER')
-ID_SHEET_KRAAL = config("ID_SHEET_KRAAL")
-
-sheet_sections = {1: ID_SHEET_CASTORES, 2: ID_SHEET_MANADA, 3: ID_SHEET_TROPA, 4: ID_SHEET_ESCULTAS, 5: ID_SHEET_ROVER, 6: ID_SHEET_KRAAL}
-
-ID_SHEET_LISTADOS = config('ID_SHEET_LISTADOS')
+SHEET_ID = config('SHEET_ID')
+WORKSHEET_FUEL = config('WORKSHEET_FUEL')
+WORKSHEET_EXPENSES = config('WORKSHEET_EXPENSES')
+WORKSHEET_TRIPS = config('WORKSHEET_TRIPS')
 
 
 def create_sheet(sheet_name, folder_id):
@@ -200,64 +194,80 @@ def rename_file(file_id: str, new_name: str) -> None:
         logger.error(e)
 
 
-def generate_sheet_sections() -> None:
-    list_sections = gillweb.get_listed_sections()
-    new_name = f'Listados-{datetime.now().strftime("%d/%m/%y %H:%M")}'
-    rename_file(ID_SHEET_LISTADOS, new_name)
-    for section, df in list_sections:
-        clear_sheet(ID_SHEET_LISTADOS, section)
-        data = [df.columns.values.tolist()]
-        data.extend(df.values.tolist())
-        append_data(ID_SHEET_LISTADOS, section, 'B2', data)
-        x = df.groupby(['Generación']).size().reset_index(name='Total')
-        x.loc[len(x.index)] = ['Total', sum(x.Total)]
-        data = [x.columns.values.tolist()]
-        data.extend(x.values.tolist())
-        append_data(ID_SHEET_LISTADOS, section, 'H3', data)
+def generate_sheet_fuel() -> None:
+    """Consulta la tabla fuel y la escribe en la pestaña Gasofa del sheet"""
+    try:
+        fuel_df = db.select('fuel')
+        fuel_df["date"] = pd.to_datetime(fuel_df["date"]).dt.strftime("%d/%m/%Y")
+        clear_sheet(SHEET_ID, WORKSHEET_FUEL)
+        data = [["Id", "Fecha", "Precio/L", "Persona"]]
+        data.extend(fuel_df.values.tolist())
+        append_data(SHEET_ID, WORKSHEET_FUEL, 'B2', data)
+        logger.info("Datos de fuel actualizados en la pestaña Gasofa")
+    except Exception as e:
+        logger.error(f"Error al actualizar fuel en Gasofa: {e}")
 
-
-def generate_sheet_assistance(section: int) -> None:
-    sheet_id = sheet_sections[section]
-    assistance = db.select_where("assistance", ['section', 'season'], [section, db.get_current_season()]).sort_values('date')
-    data_gillweb = gillweb.get_data_gillweb(section=section)[['id', 'name', 'surname']]
-    result_df = data_gillweb.copy()
-    seen = {}
-    new_columns = []
-    for item in assistance.meeting_name:
-        if item in seen:
-            seen[item] += 1
-            new_columns.append(f"{item} ({seen[item]})")
-        else:
-            seen[item] = 1
-            new_columns.append(item)
-    assistance.meeting_name = new_columns
-    current_year = db.get_current_season().split("-")[1]
-    trims = ['01-10', '03-25', '09-16']
-    date_trims = [datetime.strptime(f"{current_year}-{trim}", '%Y-%m-%d').date() for trim in trims]
-    pos = 0
-    total = 0
-
-    for index, row in assistance.iterrows():
-        if row["date"] > date_trims[pos]:
-            if total != 0:
-                result_df[f"Trimestre {pos + 1}"] = result_df[result_df.columns[-total:]].sum(axis=1)
-            pos += 1
-            total = 0
-        attendees = row['people_id']
-        result_df[row['meeting_name']] = result_df['id'].apply(lambda x: 1 if x in attendees else 0)
-        total += 1
-
-    if "Trimestre" not in result_df.columns[-1] and len(result_df.columns) > 3:
-        result_df[f"Trimestre {pos + 1}"] = result_df[result_df.columns[-total:]].sum(axis=1)
-
-    quarters_col = [index for index, column_name in enumerate(result_df.columns) if 'Trimestre' in column_name]
-
-    result_df[f"Total"] = result_df.iloc[:, quarters_col].sum(axis=1)
-    result_df[assistance.meeting_name] = result_df[assistance.meeting_name].replace({1: 'SI', 0: 'NO'})
-    result_df.sort_values('Total', inplace=True, ascending=False)
-    result_df.drop("id", inplace=True, axis=1)
-    result_df = result_df.rename(columns={"name": "Nombre", "surname": "Apellidos"})
-    clear_sheet(sheet_id, 'Asistencia')
-    data = [result_df.columns.tolist()]
-    data.extend(result_df.values.tolist())
-    append_data(sheet_id, 'Asistencia', 'B2', data)
+#
+#
+#
+# def generate_sheet_sections() -> None:
+#     list_sections = gillweb.get_listed_sections()
+#     new_name = f'Listados-{datetime.now().strftime("%d/%m/%y %H:%M")}'
+#     rename_file(ID_SHEET_LISTADOS, new_name)
+#     for section, df in list_sections:
+#         clear_sheet(ID_SHEET_LISTADOS, section)
+#         data = [df.columns.values.tolist()]
+#         data.extend(df.values.tolist())
+#         append_data(ID_SHEET_LISTADOS, section, 'B2', data)
+#         x = df.groupby(['Generación']).size().reset_index(name='Total')
+#         x.loc[len(x.index)] = ['Total', sum(x.Total)]
+#         data = [x.columns.values.tolist()]
+#         data.extend(x.values.tolist())
+#         append_data(ID_SHEET_LISTADOS, section, 'H3', data)
+#
+#
+# def generate_sheet_assistance(section: int) -> None:
+#     sheet_id = sheet_sections[section]
+#     assistance = db.select_where("assistance", ['section', 'season'], [section, db.get_current_season()]).sort_values('date')
+#     data_gillweb = gillweb.get_data_gillweb(section=section)[['id', 'name', 'surname']]
+#     result_df = data_gillweb.copy()
+#     seen = {}
+#     new_columns = []
+#     for item in assistance.meeting_name:
+#         if item in seen:
+#             seen[item] += 1
+#             new_columns.append(f"{item} ({seen[item]})")
+#         else:
+#             seen[item] = 1
+#             new_columns.append(item)
+#     assistance.meeting_name = new_columns
+#     current_year = db.get_current_season().split("-")[1]
+#     trims = ['01-10', '03-25', '09-16']
+#     date_trims = [datetime.strptime(f"{current_year}-{trim}", '%Y-%m-%d').date() for trim in trims]
+#     pos = 0
+#     total = 0
+#
+#     for index, row in assistance.iterrows():
+#         if row["date"] > date_trims[pos]:
+#             if total != 0:
+#                 result_df[f"Trimestre {pos + 1}"] = result_df[result_df.columns[-total:]].sum(axis=1)
+#             pos += 1
+#             total = 0
+#         attendees = row['people_id']
+#         result_df[row['meeting_name']] = result_df['id'].apply(lambda x: 1 if x in attendees else 0)
+#         total += 1
+#
+#     if "Trimestre" not in result_df.columns[-1] and len(result_df.columns) > 3:
+#         result_df[f"Trimestre {pos + 1}"] = result_df[result_df.columns[-total:]].sum(axis=1)
+#
+#     quarters_col = [index for index, column_name in enumerate(result_df.columns) if 'Trimestre' in column_name]
+#
+#     result_df[f"Total"] = result_df.iloc[:, quarters_col].sum(axis=1)
+#     result_df[assistance.meeting_name] = result_df[assistance.meeting_name].replace({1: 'SI', 0: 'NO'})
+#     result_df.sort_values('Total', inplace=True, ascending=False)
+#     result_df.drop("id", inplace=True, axis=1)
+#     result_df = result_df.rename(columns={"name": "Nombre", "surname": "Apellidos"})
+#     clear_sheet(sheet_id, 'Asistencia')
+#     data = [result_df.columns.tolist()]
+#     data.extend(result_df.values.tolist())
+#     append_data(sheet_id, 'Asistencia', 'B2', data)
