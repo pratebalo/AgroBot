@@ -9,7 +9,6 @@ from mimetypes import MimeTypes
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 from io import BytesIO
-from decouple import config
 import pandas as pd
 
 DICT = {
@@ -17,10 +16,6 @@ DICT = {
     'application/vnd.google-apps.spreadsheet': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/vnd.google-apps.form': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     'application/vnd.google-apps.jam': ''}
-
-FOLDER_BASE = config("FOLDER_BASE")
-FOLDER_EXPENSES = config("FOLDER_EXPENSES")
-FOLDER_PAID = config("FOLDER_PAID")
 
 SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/contacts',
           'https://www.googleapis.com/auth/spreadsheets']

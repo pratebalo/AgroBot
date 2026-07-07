@@ -29,9 +29,8 @@ CREATE TABLE public.expenses (
     date date NOT NULL,
     amount numeric(12,2) NOT NULL,
     user_name text NOT NULL,
-    attachment_type text,
-    attachment_file_id text,
-    attachment_name text
+    photo_type boolean,
+    url_drive text
 );
 
 ALTER SEQUENCE public.expenses_id_seq OWNED BY public.expenses.id;

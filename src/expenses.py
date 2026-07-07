@@ -1,6 +1,8 @@
+import os
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     CallbackContext,
@@ -11,11 +13,20 @@ from telegram.ext import (
     filters,
 )
 
+from decouple import config
+from bot_base.logger_config import logger
+from utils.client_drive import upload_file
 from utils.database import insert_into_table
 from .calendar_utils import build_calendar
 from .users import USERS
 
 SELECT_PAYER, ENTER_CONCEPT, SELECT_DATE, ENTER_AMOUNT, SELECT_ATTACHMENT_MODE, WAIT_ATTACHMENT = range(6)
+
+FOLDER_ID = config("FOLDER_ID")
+
+
+def _build_drive_url(file_id: str) -> str:
+    return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
 
 
 def _build_payers_keyboard() -> InlineKeyboardMarkup:
@@ -90,9 +101,8 @@ async def expense_attachment_mode(update: Update, context: CallbackContext):
             date=expense["date"],
             amount=expense["amount"],
             user_name=expense["user_name"],
-            attachment_type=None,
-            attachment_file_id=None,
-            attachment_name=None,
+            photo_type=None,
+            url_drive=None,
         )
 
         # Mostrar confirmación final
@@ -229,32 +239,36 @@ async def expense_amount(update: Update, context: CallbackContext):
     return SELECT_ATTACHMENT_MODE
 
 
+def download_file_telegram(file):
+    response = requests.get(file.file_path)
+    if response.status_code == 200:
+        return response.content, os.path.splitext(file.file_path)[1]
+
+    else:
+        logger.warning("Error al descargar la imagen")
+        return None, None
+
+
 async def expense_attachment_received(update: Update, context: CallbackContext):
     expense = context.user_data["expense"]
 
-    file_id = None
-    file_name = None
-    attachment_type = None
-
     # Si envía foto
     if update.message.photo:
-        file_id = update.message.photo[-1].file_id
-        file_name = "photo"
-        attachment_type = "photo"
+        file = await  update.message.photo[-1].get_file()
+        photo_type = True
 
     # Si envía documento
     elif update.message.document:
-        file_id = update.message.document.file_id
-        file_name = update.message.document.file_name or "document"
-        attachment_type = "document"
-
-    # Si envía /cancel o comando, guardar sin adjunto
-    elif update.message.text and update.message.text.startswith("/"):
-        pass  # Guardar sin adjunto
+        file = await update.message.document.get_file()
+        photo_type = False
 
     # Si envía texto cualquiera, ignorar y pedir de nuevo
     else:
         return WAIT_ATTACHMENT
+
+    data_ticket, ext_ticket = download_file_telegram(file)
+    file_id = upload_file(data=data_ticket, file_name=expense["concept"], parent_id=FOLDER_ID, photo=photo_type)
+    url_drive = _build_drive_url(file_id)
 
     insert_into_table(
         "expenses",
@@ -262,16 +276,12 @@ async def expense_attachment_received(update: Update, context: CallbackContext):
         date=expense["date"],
         amount=expense["amount"],
         user_name=expense["user_name"],
-        attachment_type=attachment_type,
-        attachment_file_id=file_id,
-        attachment_name=file_name,
+        photo_type=photo_type,
+        url_drive=url_drive,
     )
 
     # Mostrar confirmación final
-    success_text = context.user_data["expense_text"]
-    if file_name:
-        success_text += f"\nAdjunto: {file_name}"
-    success_text += "\n\n✅ Gasto guardado"
+    success_text = context.user_data["expense_text"] + "\n\n✅ Gasto guardado"
 
     await update.message.reply_text(success_text)
     return ConversationHandler.END
