@@ -1,4 +1,11 @@
-
-.idea
-# Local Google OAuth credentials
+# Secrets and local configuration
+.env
+utils/token.json
 utils/credentials.json
+
+# Local files
+*.log
+.vscode/
+__pycache__/
+*.py[cod]
+EOF
