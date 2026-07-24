@@ -11,8 +11,9 @@ from sqlalchemy import create_engine, text
 HOST = config("HOST")
 USER_DB = config("DB_USER")
 DATABASE = config("DB_NAME")
-PASSWORD_DB = config("DB_PASS")
-engine = create_engine(f'postgresql://{USER_DB}:{PASSWORD_DB}@{HOST}:5433/{DATABASE}')
+DB_PORT = config("DB_PORT")
+DB_PASS = config("DB_PASS")
+engine = create_engine(f'postgresql://{USER_DB}:{DB_PASS}@{HOST}:{DB_PORT}/{DATABASE}')
 connection = engine.connect()
 
 

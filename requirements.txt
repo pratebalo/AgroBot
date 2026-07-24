@@ -2,6 +2,7 @@ pandas
 python-decouple==3.8
 python-telegram-bot
 python-telegram-bot[job-queue]==22.7
-psycopg2
+psycopg2-binary
 google-api-python-client
 google_auth_oauthlib
+sqlalchemy

@@ -1,2 +1,4 @@
 
 .idea
+# Local Google OAuth credentials
+utils/credentials.json
